@@ -19,7 +19,7 @@ from stable_baselines3.common.env_checker import check_env
 
 from typing import Callable
 import os
-from vecenv import CarEnv
+from environment import CarEnv
 import time
 
 print('This is the start of training script')
@@ -36,17 +36,16 @@ if not os.path.exists(logdir):
 
 print('connecting to env..')
 
-env = CarEnv()
-check_env(env, warn=True)
+env = CarEnv()  # Try check_env(env, warn=True) 
 env.reset()
 
 print('Env has been reset as part of launch')
 
 model = PPO('MlpPolicy', env, verbose=1, learning_rate=0.001, tensorboard_log=logdir)
 
-TIMESTEPS = 500_000 # how long is each training iteration - individual steps
+TIMESTEPS = 2500 # how long is each training iteration - individual steps
 iters = 0
-while iters<5:  # how many training iterations you want
+while iters<2:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO" )
