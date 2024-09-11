@@ -43,9 +43,9 @@ print('Env has been reset as part of launch')
 
 model = PPO('MlpPolicy', env, verbose=1, learning_rate=0.001, tensorboard_log=logdir)
 
-TIMESTEPS = 2500 # how long is each training iteration - individual steps
+TIMESTEPS = 2000000 # how long is each training iteration - individual steps
 iters = 0
-while iters<2:  # how many training iterations you want 
+while iters<1:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO" )

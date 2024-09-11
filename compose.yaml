@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  carla:
+    image: carlasim/carla:0.9.15
+    command: ["bash", "./CarlaUE4.sh", "-vulkan -RenderOffScreen"]
+    runtime: nvidia
+    ports:
+      - "2000-2002:2000-2002"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - QT_X11_NO_MITSHM=1 # Fix a bug with QT
+      - SDL_VIDEODRIVER=x11
+    volumes:
+      - ${HOME}/.Xauthority:/root/.Xauthority:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    privileged: true
+    network_mode: "host"
+    stdin_open: true
+    tty: true
