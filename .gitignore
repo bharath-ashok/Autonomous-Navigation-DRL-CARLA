@@ -19,3 +19,4 @@ logs
 .vscode
 __pycache__
 Test_Carenv.ipynb
+waypoint_test_town2.py
