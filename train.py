@@ -17,7 +17,6 @@ Terminology:
 from stable_baselines3 import PPO #PPO
 from stable_baselines3.common.env_checker import check_env
 
-from typing import Callable
 import os
 from environment import CarEnv
 import time
@@ -25,8 +24,8 @@ import time
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/{int(time.time())}/"
-logdir = f"logs/{int(time.time())}/"
+models_dir = f"models/2809/{int(time.time())}/"
+logdir = f"logs/2809/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -37,13 +36,14 @@ if not os.path.exists(logdir):
 print('connecting to env..')
 
 env = CarEnv()  # Try check_env(env, warn=True) 
+check_env(env, warn=True) 
 env.reset()
 
 print('Env has been reset as part of launch')
 
-model = PPO('MlpPolicy', env, verbose=1, learning_rate=0.001, tensorboard_log=logdir)
+model = PPO('MlpPolicy', env, verbose=1, learning_rate=0.0003, tensorboard_log=logdir)
 
-TIMESTEPS = 2000000 # how long is each training iteration - individual steps
+TIMESTEPS = 1000000 # how long is each training iteration - individual steps
 iters = 0
 while iters<1:  # how many training iterations you want 
 	iters += 1
