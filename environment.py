@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 SECONDS_PER_EPISODE = 20
 FIXED_DELTA_SECONDS = 0.01
-SHOW_PREVIEW = False
-NO_RENDERING = True
+SHOW_PREVIEW = True
+NO_RENDERING = False
 SYNCHRONOUS_MODE = True
 SPIN = 10
 HEIGHT = 480
@@ -42,8 +42,12 @@ class CarEnv(gym.Env):
         self.vehicle = None
         self.collision_hist = []
         obs_dim = 3
-        self.observation_space = spaces.Box(low=-1, high=1, shape=(obs_dim,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([9, 4])
+        low = np.array([-1, 0, -1], dtype=np.float32)  # Set speed to [0, 1] and other values to [-1, 1]
+        high = np.array([1, 1, 1], dtype=np.float32)
+
+        self.observation_space = spaces.Box(low=low, high=high, shape=(obs_dim,), dtype=np.float32)
+        self.action_space = spaces.MultiDiscrete([9, 4])  # No change to the action space
+
 
         self.client = carla.Client('localhost', 2000)
         self.client.set_timeout(15.0)
@@ -78,16 +82,15 @@ class CarEnv(gym.Env):
                 except Exception as e:
                     print(f"Failed to destroy actor {actor.id}: {e}")
 
-    def get_observation(self, vehicle_transform, dest_waypoint):
+    def get_observation(self, vehicle_transform, dest_waypoint, velocity):
 
         if self.vehicle and self.vehicle.is_alive:
-            velocity = self.vehicle.get_velocity()
             speed = self.get_speed(velocity)
         else:
             speed = 0  # Default speed if vehicle is not available
 
-        lateral_distance = self.get_lateral_distance(vehicle_transform, self.dest_waypoint)
-        heading = self.get_relative_heading(vehicle_transform, self.dest_waypoint.transform)
+        lateral_distance = self.get_lateral_distance(vehicle_transform, dest_waypoint)
+        heading = self.get_relative_heading(vehicle_transform, dest_waypoint)
 
         if self.step_counter % 100 == 0:
             logger.info(f"lateral_distance: {lateral_distance}, speed: {speed}, heading: {heading}")
@@ -118,40 +121,45 @@ class CarEnv(gym.Env):
         
         self.world.tick()
         self.simulation_time += FIXED_DELTA_SECONDS
+        velocity = self.vehicle.get_velocity()
         vehicle_transform = self.vehicle.get_transform()
         vehicle_location = vehicle_transform.location
-        speed = self.get_speed(self.vehicle.get_velocity())
+        speed = self.get_speed(velocity)
+        if self.step_counter % 100 == 0:
+            print(f"s: {speed*60}, loc: {vehicle_location}")
+            print(f"dest: {self.dest_waypoint.transform.location}")
         lateral_distance = self.get_lateral_distance(vehicle_transform, self.dest_waypoint)
-        heading = self.get_relative_heading(vehicle_transform, self.dest_waypoint.transform)
 
-        reward = self.calculate_reward(speed, lateral_distance, heading)
+        reward = self.calculate_reward(speed, lateral_distance)
         done = False
   
         # --- Reward based on proximity to the next waypoint ---
         distance_to_waypoint = vehicle_location.distance(self.dest_waypoint.transform.location)        
-        waypoint_threshold = 0.3  # You can adjust this threshold based on desired precision
+        waypoint_threshold = 0.4  # You can adjust this threshold based on desired precision
         if distance_to_waypoint < waypoint_threshold:
-            reward += 5  # Reward for reaching the waypoint
+            reward += 10  # Reward for reaching the waypoint
             self.dest_waypoint = self.next_waypoint(self.dest_waypoint)  # Set the next waypoint as destination
             logger.info(f'Passed waypoint, moving to next. Reward: {reward}')
 
         # --- Penalize for collisions ---
         if len(self.collision_hist) != 0:
             done = True
-            reward -= 100  # Strong penalty for collisions
+            reward -= 1000  # Strong penalty for collisions
             logger.info('Collision detected, ending episode')
             self.cleanup()  
 
         # --- Check if episode time limit reached ---
         if self.simulation_time > SECONDS_PER_EPISODE:
             done = True
-            reward += 50  # Penalize slightly for not finishing the episode successfully
+            reward += 100  # Penalize slightly for not finishing the episode successfully
             logger.info(f'Reward: {reward}, Episode time limit reached')
             self.cleanup()
         # Update the observation
         if not done:
-            self.observation = self.get_observation(vehicle_transform, self.dest_waypoint)
-
+            self.observation = self.get_observation(vehicle_transform, self.dest_waypoint, velocity)
+            if self.step_counter % 100 == 0:
+                print(f"vehicle_transform: {vehicle_transform}, self.dest_waypoint: {self.dest_waypoint}, velocity: {velocity}")
+                print(f"obs: {self.observation}")
         return self.observation, reward, done, False, {}
     
     def collision_data(self, event):
@@ -173,6 +181,8 @@ class CarEnv(gym.Env):
         self.actor_list.append(self.vehicle)
         self.world.tick()
         vehicle_transform = self.vehicle.get_transform()
+        velocity = self.vehicle.get_velocity()
+        speed = self.get_speed(velocity)
         # Initialize waypoints
         try:
             self.start_waypoint = self.initial_waypoint_location(self.spawn_position)
@@ -211,7 +221,7 @@ class CarEnv(gym.Env):
         self.step_counter = 0
         # Get the initial observation
         try:
-            self.observation = self.get_observation(vehicle_transform, self.dest_waypoint)
+            self.observation = self.get_observation(vehicle_transform, self.dest_waypoint, velocity)
         except Exception as e:
             logger.error(f"Failed to get initial observation: {e}")
             raise
@@ -242,7 +252,7 @@ class CarEnv(gym.Env):
         closest_waypoint = self.waypoints[closest_index]
         return closest_waypoint
    
-    def next_waypoint(self, start_waypoint, look_ahead=5.0):
+    def next_waypoint(self, start_waypoint, look_ahead=3.0):
         next_wps = start_waypoint.next(look_ahead)
         if next_wps:
             return next_wps[0]
@@ -251,7 +261,7 @@ class CarEnv(gym.Env):
             logger.warning('No next waypoint found.')
             return None
     
-    def get_speed(self, v, max_speed=50.0):
+    def get_speed(self, v, max_speed=60.0):
         if not isinstance(v, carla.Vector3D):
             logger.error("Invalid velocity vector provided.")
             return 0
@@ -298,92 +308,109 @@ class CarEnv(gym.Env):
         return normalized_lateral_distance
 
     
-    def get_relative_heading(self, vehicle_transform, waypoint_transform):
+    def get_relative_heading(self, vehicle_transform, waypoint):
         # Extract vehicle and waypoint yaw in degrees
         vehicle_yaw = vehicle_transform.rotation.yaw
-        waypoint_yaw = waypoint_transform.rotation.yaw
-
-        # Check if the current waypoint is part of a turn
-        future_waypoint = self.next_waypoint(self.dest_waypoint, 10)  # Look ahead 10 meter
-
-        if self.is_turn_or_intersection(self.dest_waypoint, future_waypoint, 25):
-            # Calculate average heading for waypoints in the turn
-            turn_headings = []
-            for i in range(1, 8):
-                waypoint = self.next_waypoint(self.dest_waypoint, i)
-                if waypoint:
-                    turn_headings.append(waypoint.transform.rotation.yaw)
-                else:
-                    break
-            
-            if turn_headings:
-                # Calculate average heading of the turn
-                avg_heading = np.mean(turn_headings)
-                # Compute the **absolute heading** difference
-                relative_heading = (avg_heading - vehicle_yaw) % 360
-                
-                # Normalize to [-180, 180] range
-                if relative_heading > 180:
-                    relative_heading -= 360
-                normalized_heading = relative_heading / 180.0
-                return np.clip(normalized_heading, -1, 1)
-
-        # Compute the **absolute heading** (difference between waypoint and vehicle yaw)
-        relative_heading = (waypoint_yaw - vehicle_yaw) % 360
+        waypoint_yaw = waypoint.transform.rotation.yaw
+        num_lookahead = 5  # Number of waypoints to look ahead
+        distance_lookahead = 3.0
+        yaw_differences_sum = 0  # Accumulator for the sum of yaw differences
+        current_waypoint = waypoint  # Start from the current waypoint
+        turn_direction = self.turn_directon(vehicle_transform, waypoint, num_lookahead, distance_lookahead)
         
+        for i in range(1, num_lookahead + 1):
+            # Fetch the next waypoint 'i' steps ahead
+            future_waypoint = self.next_waypoint(current_waypoint, distance_lookahead)
+            
+            if not future_waypoint:
+                break  # Stop if there's no more valid waypoints
+        
+            # Check if the current waypoint is part of a turn
+            future_yaw = future_waypoint.transform.rotation.yaw
+            yaw_diff = abs(current_waypoint.transform.rotation.yaw - future_yaw) % 360
+            yaw_diff = yaw_diff if yaw_diff <= 180 else 360 - yaw_diff
+            
+            # Accumulate the yaw difference
+            yaw_differences_sum += yaw_diff
+            
+            # Move to the next waypoint for the next iteration
+            current_waypoint = future_waypoint
+            
+            # If we gathered yaw differences, process the sum
+        if yaw_differences_sum > 22.5:
+            # Calculate relative heading as the difference between the yaw sum and the vehicle's yaw
+            relative_heading = (yaw_differences_sum) % 360
+            
+            # Normalize to [-180, 180] range
+            if relative_heading > 180:
+                relative_heading -= 360
+
+            # Adjust the heading based on the turn direction
+            normalized_heading = turn_direction * (relative_heading / 180.0)
+            return np.clip(normalized_heading, -1, 1)
+
+        # If no turn detected, calculate the basic relative heading from the closest waypoint
+        relative_heading = (waypoint_yaw - vehicle_yaw) % 360
+
         # Normalize to [-180, 180] range
         if relative_heading > 180:
             relative_heading -= 360
+
         normalized_heading = relative_heading / 180.0
         return np.clip(normalized_heading, -1, 1)
 
-    def is_turn_or_intersection(self, wp, next_wp, turn_threshold):
+
+    def turn_directon(self, vehicle_transform, waypoint, num_lookahead=5, distance_lookahead=3.0):
         # Extract yaw angles from waypoints
-        yaw1 = wp.transform.rotation.yaw
-        yaw2 = next_wp.transform.rotation.yaw
+        vehicle_yaw = vehicle_transform.rotation.yaw  # Vehicle's current yaw
+        current_waypoint = waypoint  # Start from the current waypoint
+        future_waypoint = None
+        for i in range(1, num_lookahead + 1):
+            future_waypoint = self.next_waypoint(current_waypoint, distance_lookahead)
+            if not future_waypoint:
+                break  # Stop if there's no valid future waypoint
+            current_waypoint = future_waypoint  # Move to the next waypoint
 
-        # Calculate the absolute difference in yaw angles
-        yaw_diff = abs(yaw1 - yaw2) % 360
-        yaw_diff = yaw_diff if yaw_diff <= 180 else 360 - yaw_diff
-
-        # Determine if the yaw difference exceeds the turn threshold
-        return yaw_diff > turn_threshold
-    
-    def calculate_reward(self, speed, lateral_distance, heading):
-        reward = 0
-        # Reward based on speed
-        min_speed = 20.0  # Minimum speed in km/h
-
-        if speed < min_speed:
-            # Penalize more severely if speed is below the minimum
-            penalty = (min_speed - speed) ** 2 / 100  # Quadratic penalty
-            reward -= penalty
-        else:
-            # Reward for maintaining a reasonable speed
-            if 20 <= speed <= 40:
-                reward += 1.0
+        if future_waypoint:
+            # Get the yaw of the future waypoint
+            future_yaw = future_waypoint.transform.rotation.yaw
+            
+            # Calculate the yaw difference between the vehicle and the future waypoint
+            yaw_diff = (future_yaw - vehicle_yaw) % 360
+            
+            # Normalize the yaw difference to the [-180, 180] range
+            if yaw_diff > 180:
+                yaw_diff -= 360
+            if yaw_diff > 10:  # If the future yaw is greater than the vehicle's yaw by a threshold
+                return 1
             else:
-                reward -= (speed - 40) ** 2 / 100  # Quadratic penalty for over-speeding
-
+                return -1
+    
+    def calculate_reward(self, speed, lateral_distance):
+        reward = 0        
+        # Penalize the vehicle for not moving or moving very slowly
+        if speed <= 0.1:  # Consider speed close to zero as 'not moving'
+            reward -= 10.0  # Severe penalty for not moving
+        else:
+            # Reward based on normalized speed (in the range [0, 1])
+            if 0.33 <= speed <= 0.67:  # Speed range of about 20-40 km/h
+                reward += 5.0
+            elif speed > 0.67:  # Over-speeding beyond 40 km/h
+                reward -= (speed - 0.67) ** 2 / 100  # Penalize for going too fast
+            else:  # Speed is too slow but non-zero
+                reward -= (0.33 - speed) ** 2 / 100  # Penalize for moving too slowly
+            
         # Reward for lateral distance
         lateral_threshold = 0.2
         if abs(lateral_distance) < lateral_threshold:
-            reward += 5.0  # Strong reward for being within the desired lateral distance
+            reward += 5  # Strong reward for being within the desired lateral distance
         else:
             # Penalize based on distance from the center line
-            lateral_penalty = 5.0 / (1 + np.exp(-10 * (abs(lateral_distance) - lateral_threshold)))
+            lateral_penalty = 5 / (1 + np.exp(-10 * (abs(lateral_distance) - lateral_threshold)))
             reward -= lateral_penalty
 
-        # Reward for relative heading
-        heading_threshold = 0.1
-        if abs(heading) < heading_threshold:
-            reward += 5.0  # Strong reward for having the correct heading
-        else:
-            # Penalize based on deviation from the correct heading
-            heading_penalty = 2.0 * abs(heading)  # Stronger penalty for larger heading deviations
-            reward -= heading_penalty
-        
         return reward
+
 
 #  BELOW NOT USED -->>
     def get_future_headings(self, vehicle_transform, waypoints):

@@ -24,8 +24,8 @@ import time
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/2809/{int(time.time())}/"
-logdir = f"logs/2809/{int(time.time())}/"
+models_dir = f"models/0210/{int(time.time())}/"
+logdir = f"logs/0210/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -41,11 +41,22 @@ env.reset()
 
 print('Env has been reset as part of launch')
 
-model = PPO('MlpPolicy', env, verbose=1, learning_rate=0.0003, tensorboard_log=logdir)
+model = PPO(
+    'MlpPolicy', 
+    env, 
+    verbose=1, 
+    learning_rate=0.0003, 
+    n_steps=1024, 
+    batch_size=64, 
+    clip_range=0.1, 
+    gamma=0.99, 
+    normalize_advantage=True,
+    tensorboard_log=logdir
+)
 
-TIMESTEPS = 1000000 # how long is each training iteration - individual steps
+TIMESTEPS = 250000 # how long is each training iteration - individual steps
 iters = 0
-while iters<1:  # how many training iterations you want 
+while iters<4:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO" )
