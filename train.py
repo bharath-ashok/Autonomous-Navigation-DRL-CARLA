@@ -24,8 +24,8 @@ import time
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/2110/{int(time.time())}/"
-logdir = f"logs/2110/{int(time.time())}/"
+models_dir = f"models/2310/{int(time.time())}/"
+logdir = f"logs/2310/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)

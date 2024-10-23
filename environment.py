@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 SECONDS_PER_EPISODE = 20
-FIXED_DELTA_SECONDS = 0.01
+FIXED_DELTA_SECONDS = 0.05
 SHOW_PREVIEW = False
 NO_RENDERING = True
 SYNCHRONOUS_MODE = True
@@ -46,7 +46,7 @@ class CarEnv(gym.Env):
         high = np.array([1, 1, 1], dtype=np.float32)
 
         self.observation_space = spaces.Box(low=low, high=high, shape=(obs_dim,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([9, 4])  # No change to the action space
+        self.action_space = spaces.MultiDiscrete([9, 6])  # No change to the action space
 
 
         self.client = carla.Client('localhost', 2000)
@@ -115,7 +115,7 @@ class CarEnv(gym.Env):
 
         # Map throttle and apply control
         throttle_mapping = {
-            0: (0.0, 1.0), 1: (0.3, 0.0), 2: (0.7, 0.0), 3: (1.0, 0.0)
+            0: (0.0, 1.0), 1: (0.2, 0.0), 2: (0.4, 0.0), 3: (0.6, 0.0), 4: (0.8, 0.0), 5: (1, 0.0)
         }
         throttle_val, brake_val = throttle_mapping.get(throttle, (1.0, 0.0))
         self.vehicle.apply_control(carla.VehicleControl(throttle=throttle_val, steer=steer, brake=brake_val))
@@ -127,9 +127,9 @@ class CarEnv(gym.Env):
         vehicle_location = vehicle_transform.location
         speed = self.get_speed(velocity)
         lateral_distance = self.get_lateral_distance(vehicle_transform, self.dest_waypoint)
-        relative_heading = self.get_relative_heading(vehicle_transform, self.dest_waypoint)
+        relative_yaw = (vehicle_transform.rotation.yaw - self.dest_waypoint.transform.rotation.yaw) % 360
 
-        reward = self.calculate_reward(speed, lateral_distance, relative_heading)
+        reward = self.calculate_reward(speed, lateral_distance, relative_yaw)
         done = False
   
         # --- Reward based on proximity to the next waypoint ---
@@ -138,26 +138,33 @@ class CarEnv(gym.Env):
         if distance_to_waypoint < waypoint_threshold:
             #reward += 10  # Reward for reaching the waypoint
             self.dest_waypoint = self.next_waypoint(self.dest_waypoint)  # Set the next waypoint as destination
+            if self.dest_waypoint is None:
+                logger.error('No valid next waypoint found, terminating episode.')
+                done = True  # Set done to True if no valid waypoint is available
             logger.info(f'Passed waypoint. Reward: {reward}')
 
         # --- Penalize for collisions ---
         if len(self.collision_hist) != 0:
             reward -= 100  # Strong penalty for collisions
-            self.vehicle.set_transform(carla.Transform(self.start_waypoint.transform.location))
-            self.dest_waypoint = self.next_waypoint(self.start_waypoint)
-            logger.info('Collision detected, vehicle reset.') 
+            logger.info('Collision detected, resetting vehicle.')
+
+            # Reset vehicle position to the starting waypoint
+            self.vehicle.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, steer=0.0))
+            self.vehicle.set_transform(self.dest_waypoint.transform)
+            self.world.tick()
+            time.sleep(0.1)  # Brief delay to ensure the reset takes effect
+            # Update the destination waypoint to the next waypoint from the starting waypoint
+            self.dest_waypoint = self.next_waypoint(self.dest_waypoint)
+            self.collision_hist.clear()
 
         # --- Check if episode time limit reached ---
         if self.simulation_time > SECONDS_PER_EPISODE:
             done = True
-            reward += 100  # Penalize slightly for not finishing the episode successfully
             logger.info(f'Reward: {reward}, Episode time limit reached')
             self.cleanup()
         # Update the observation
         if not done:
             self.observation = self.get_observation(vehicle_transform, self.dest_waypoint, velocity)
-            if self.step_counter % 100 == 0:
-                logger.info(f"vehicle_transform: {vehicle_transform}, self.dest_waypoint: {self.dest_waypoint}, velocity: {velocity}")
         return self.observation, reward, done, False, {}
     
     def collision_data(self, event):
@@ -198,9 +205,10 @@ class CarEnv(gym.Env):
         
         # Apply control to ensure the vehicle is stationary
         self.vehicle.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0, steer=0.0))
+        self.world.tick()
         try:
             #camera_init_trans = carla.Transform(carla.Location(z=self.CAMERA_POS_Z, x=self.CAMERA_POS_X))
-            if self.SHOW_CAM:
+            if self.SHOW_CAM and self.spectator is not None:
                 spectator_transform =  self.vehicle.get_transform()
                 spectator_transform.rotation.pitch -= 60.0
                 spectator_transform.location += carla.Location( z = 15.0)
@@ -233,15 +241,18 @@ class CarEnv(gym.Env):
 
         transform = random.choice(spawn_points)
         vehicle = None
-        while vehicle is None:
+        retries = 10  # or any reasonable limit
+        while vehicle is None and retries > 0:
             try:
                 vehicle = self.world.spawn_actor(self.model_3, transform)
             except Exception as e:
+                retries -= 1
                 logger.error(f"Failed to spawn vehicle: {e}")
                 time.sleep(0.2)  # Brief delay before retrying
-
-            logger.info(f'Spawning vehicle at: {transform.location}')
-            self.spawn_position = transform.location
+        if vehicle is None:
+            raise RuntimeError("Vehicle could not be spawned after multiple attempts.")
+        logger.info(f'Spawned vehicle at: {transform.location}')
+        self.spawn_position = transform.location
         return vehicle
     
     def initial_waypoint_location(self, initial_pos):
@@ -305,10 +316,10 @@ class CarEnv(gym.Env):
 
         return normalized_lateral_distance
 
-    
     def get_relative_heading(self, vehicle_transform, waypoint):
         # Extract vehicle and waypoint yaw in degrees
         vehicle_yaw = vehicle_transform.rotation.yaw
+        waypoint_yaw = waypoint.transform.rotation.yaw
         current_waypoint = waypoint  # Start from the current waypoint
         num_lookahead = 5  # Number of waypoints to look ahead
         distance_lookahead = 3.0
@@ -321,8 +332,7 @@ class CarEnv(gym.Env):
             
             if not future_waypoint:
                 break  # Stop if there's no more valid waypoints
-        
-            # Check if the current waypoint is part of a turn
+    
             future_yaw = future_waypoint.transform.rotation.yaw
             yaw_diff = abs(current_waypoint.transform.rotation.yaw - future_yaw) % 360
             yaw_diff = yaw_diff if yaw_diff <= 180 else 360 - yaw_diff
@@ -333,9 +343,10 @@ class CarEnv(gym.Env):
             # Move to the next waypoint for the next iteration
             current_waypoint = future_waypoint
 
-        vehicle_yaw = vehicle_yaw % 360            
+        vehicle_yaw = vehicle_yaw % 360     
+        relative_yaw = (vehicle_yaw - waypoint_yaw) % 360            
         # Calculate relative heading as the difference between the yaw sum and the vehicle's yaw
-        relative_heading = (yaw_differences_sum - vehicle_yaw) % 360
+        relative_heading = (yaw_differences_sum - turn_direction*relative_yaw) % 360
         
         # Normalize to [-180, 180] range
         if relative_heading > 180:
@@ -366,12 +377,12 @@ class CarEnv(gym.Env):
             # Normalize the yaw difference to the [-180, 180] range
             if yaw_diff > 180:
                 yaw_diff -= 360
-            if yaw_diff > 10:  # If the future yaw is greater than the vehicle's yaw by a threshold
+            if yaw_diff > 0:  # If the future yaw is greater than the vehicle's yaw by a threshold
                 return 1
             else:
                 return -1
     
-    def calculate_reward(self, speed, lateral_distance, relative_heading):
+    def calculate_reward(self, speed, lateral_distance, relative_yaw):
         reward = 0        
         # Penalize the vehicle for not moving or moving very slowly
         if speed <= 0.1:  # Consider speed close to zero as 'not moving'
@@ -394,25 +405,13 @@ class CarEnv(gym.Env):
             lateral_penalty = 5 / (1 + np.exp(-10 * (abs(lateral_distance) - lateral_threshold)))
             reward -= lateral_penalty
 
-        relative_heading_threshold = 0.1
-        if abs(relative_heading) < relative_heading_threshold:
-            reward += 5
+        relative_heading_threshold = 30  # Threshold for relative heading (in degrees)
+        if abs(relative_yaw) < relative_heading_threshold:
+            reward += 2.5
         else:
-            heading_penalty = 5 / (1 + np.exp(-10 * (abs(relative_heading) - relative_heading_threshold)))
+            heading_penalty = 5 / (1 + np.exp(-10 * (abs(relative_yaw) - relative_heading_threshold)))
             reward -= heading_penalty
 
         return reward
 
-
-#  BELOW NOT USED -->>
-    def get_future_headings(self, vehicle_transform, waypoints):
-        headings = []
-        for waypoint in waypoints[:3]:  # Get the heading to the next 3 waypoints
-            heading = self.get_relative_heading(vehicle_transform, waypoint.transform)
-            headings.append(self.normalize_heading_angle(heading))
-        return headings  # Return a list of normalized headings
-
-    def normalize_heading_angle(self, relative_heading):
-        # Normalize the heading angle to the range [-1, 1]
-        return relative_heading / 180.0
     
