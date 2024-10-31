@@ -18,14 +18,14 @@ from stable_baselines3 import PPO #PPO
 from stable_baselines3.common.env_checker import check_env
 
 import os
-from environment import CarEnv
+from environment_cleancode import CarEnv
 import time
 
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/2310/{int(time.time())}/"
-logdir = f"logs/2310/{int(time.time())}/"
+models_dir = f"models/3110/{int(time.time())}/"
+logdir = f"logs/3110/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)

@@ -5,8 +5,8 @@ import time
 from environment import CarEnv
 
 # Directory containing saved models
-models_dir = "models/2110//1729498948"
-logdir = "logs/2110//1729498948"
+models_dir = "models/2510/1729841881"
+logdir = "logs/2510/1729841881"
 
 # Ensure the directories exist
 assert os.path.exists(models_dir), f"Model directory {models_dir} does not exist!"

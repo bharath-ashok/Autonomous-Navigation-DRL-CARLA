@@ -295,98 +295,83 @@ class CarEnv(gym.Env):
         return normalized_speed
 
     def get_lateral_distance(self, vehicle_transform, waypoint, max_distance=3.0):
-        # Get vehicle and waypoint positions
-        waypoint_location = waypoint.transform.location
-        waypoint_forward_vector = waypoint.transform.get_forward_vector()
-        vehicle_location = vehicle_transform.location
+            # Get vehicle and waypoint positions
+            waypoint_location = waypoint.transform.location
+            waypoint_forward_vector = waypoint.transform.get_forward_vector()
+            vehicle_location = vehicle_transform.location
 
-        # Convert CARLA location objects to NumPy arrays for easier vector calculations
-        waypoint_location_np = np.array([waypoint_location.x, waypoint_location.y])
-        waypoint_forward_np = np.array([waypoint_forward_vector.x, waypoint_forward_vector.y])
-        vehicle_location_np = np.array([vehicle_location.x, vehicle_location.y])
+            # Convert CARLA location objects to NumPy arrays
+            waypoint_location_np = np.array([waypoint_location.x, waypoint_location.y])
+            waypoint_forward_np = np.array([waypoint_forward_vector.x, waypoint_forward_vector.y])
+            vehicle_location_np = np.array([vehicle_location.x, vehicle_location.y])
 
-        # Normalize the waypoint's forward vector (this is the direction of the lane)
-        norm = np.linalg.norm(waypoint_forward_np)
-        if norm == 0:
-            return 0  # Prevent division by zero if the forward vector length is zero
-        waypoint_forward_np = waypoint_forward_np / norm
+            # Normalize the waypoint's forward vector
+            norm = np.linalg.norm(waypoint_forward_np)
+            if norm == 0:
+                return 0  # Prevent division by zero
+            waypoint_forward_np /= norm
 
-            # Vector from the waypoint (center of the lane) to the vehicle
-        vehicle_vector_np = vehicle_location_np - waypoint_location_np
+            # Calculate the vector from waypoint to vehicle and its projection on the lane direction
+            vehicle_vector_np = vehicle_location_np - waypoint_location_np
+            projection_length = np.dot(vehicle_vector_np, waypoint_forward_np)
+            projection_point = projection_length * waypoint_forward_np
+            lateral_vector = vehicle_vector_np - projection_point
+            lateral_distance = np.linalg.norm(lateral_vector)
 
-        # Project the vehicle vector onto the waypoint's forward vector (lane direction)
-        projection_length = np.dot(vehicle_vector_np, waypoint_forward_np)
-        projection_point = projection_length * waypoint_forward_np
+            # Normalize lateral distance and determine side (left/right) of vehicle relative to lane center
+            normalized_lateral_distance = lateral_distance / max_distance
+            cross_product = np.cross(waypoint_forward_np, vehicle_vector_np)
+            if cross_product < 0:  # Right side of lane center
+                normalized_lateral_distance *= -1
 
-        lateral_vector = vehicle_vector_np - projection_point
-        lateral_distance = np.linalg.norm(lateral_vector)
-
-        # Normalize the lateral distance to the range [-1, 1]
-        normalized_lateral_distance = np.clip(lateral_distance / max_distance, -1, 1)
-
-        # Check if the vehicle is to the left or right of the lane center by using a cross product
-        cross_product = np.cross(waypoint_forward_np, vehicle_vector_np)
-        if cross_product < 0:
-            # If the cross product is negative, the vehicle is to the right of the lane
-            normalized_lateral_distance *= -1
-
-        return normalized_lateral_distance
+            return np.clip(normalized_lateral_distance, -1, 1)
 
     def get_relative_heading(self, vehicle_transform, waypoint, num_lookahead=5, distance_lookahead=3.0):
-        # Extract vehicle and waypoint yaw in degrees
+        # Vehicle's current yaw and waypoint's initial yaw
         vehicle_yaw = vehicle_transform.rotation.yaw % 360
-        waypoint_yaw = waypoint.transform.rotation.yaw % 360
-        
-        current_waypoint = waypoint  # Start from the current waypoint
-        yaw_differences_sum = 0  # Accumulator for the sum of yaw differences
-        turn_direction = self.turn_direction(vehicle_transform, waypoint, num_lookahead, distance_lookahead)
-        
-        # Sum up yaw differences from the current waypoint and future waypoints
+        current_waypoint = waypoint
+        yaw_differences_sum = 0  # Sum for average yaw differences
+
+        # Accumulate yaw differences over lookahead waypoints
         for i in range(1, num_lookahead + 1):
             future_waypoint = self.next_waypoint(current_waypoint, distance_lookahead)
             if not future_waypoint:
-                break  # Stop if no valid future waypoint
+                break
             
             future_yaw = future_waypoint.transform.rotation.yaw % 360
             yaw_diff = (future_yaw - current_waypoint.transform.rotation.yaw + 180) % 360 - 180
-            
-            # Accumulate the yaw difference
             yaw_differences_sum += yaw_diff
             current_waypoint = future_waypoint
 
-        # Normalize vehicle yaw and relative heading
-        relative_yaw = (vehicle_yaw - waypoint_yaw + 180) % 360 - 180
-        relative_heading = (yaw_differences_sum - turn_direction * relative_yaw) % 360
+        # Compute average future yaw difference
+        average_yaw_diff = yaw_differences_sum / max(1, num_lookahead)
+        relative_yaw = (vehicle_yaw - waypoint.transform.rotation.yaw + 180) % 360 - 180
+        relative_heading = (average_yaw_diff - relative_yaw) % 360
 
-        # Normalize to [-180, 180] range
+        # Adjust to [-180, 180] and normalize
         if relative_heading > 180:
             relative_heading -= 360
 
-        if turn_direction != 0:
-            normalized_heading = turn_direction * (relative_heading / 180.0)
-        else:
-            # If turn direction is 0 (i.e., straight), we just normalize relative_heading without adjustment
-            normalized_heading = relative_heading / 180.0
-        
-        return np.clip(normalized_heading, -1, 1)
+        return np.clip(relative_heading / 180.0, -1, 1)
 
     def turn_direction(self, vehicle_transform, waypoint, num_lookahead=5, distance_lookahead=3.0):
+        # Determine vehicle yaw and initialize waypoint lookahead
         vehicle_yaw = vehicle_transform.rotation.yaw % 360
         current_waypoint = waypoint
 
-        # Look ahead at future waypoints
+        # Calculate yaw change across lookahead points to determine turn direction
         for i in range(1, num_lookahead + 1):
             future_waypoint = self.next_waypoint(current_waypoint, distance_lookahead)
             if not future_waypoint:
                 break
             current_waypoint = future_waypoint
 
-        # Check if there is a valid future waypoint
-        if future_waypoint:
-            future_yaw = future_waypoint.transform.rotation.yaw % 360
+        # Check valid future waypoint
+        if current_waypoint:
+            future_yaw = current_waypoint.transform.rotation.yaw % 360
             yaw_diff = (future_yaw - vehicle_yaw + 180) % 360 - 180
             
-            # Return direction: 1 for left (counterclockwise), -1 for right (clockwise)
+            # Determine direction based on yaw difference
             return 1 if yaw_diff > 0 else -1
         return 0
     
