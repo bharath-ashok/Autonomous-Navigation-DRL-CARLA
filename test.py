@@ -2,11 +2,11 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 import os
 import time
-from environment import CarEnv
+from environment_cleancode import CarEnv
 
 # Directory containing saved models
-models_dir = "models/2510/1729841881"
-logdir = "logs/2510/1729841881"
+models_dir = "models/1111/1731338109"
+logdir = "logs/1111/1731338109"
 
 # Ensure the directories exist
 assert os.path.exists(models_dir), f"Model directory {models_dir} does not exist!"
@@ -22,8 +22,10 @@ check_env(env)
 env.reset()
 
 # Select the most recent model to test
-latest_model_path = os.path.join(models_dir, model_files[-1])
-print(f"Loading model from {latest_model_path}")
+# Assuming the best model is the one with the highest reward in the filename
+best_model_file = ('best_model' if 'best_model' in model_files else model_files[-1])
+latest_model_path = os.path.join(models_dir, best_model_file)
+print(f"Loading best model from {latest_model_path}")
 model = PPO.load(latest_model_path, env=env)
 
 # Number of episodes to test

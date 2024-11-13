@@ -20,12 +20,13 @@ from stable_baselines3.common.env_checker import check_env
 import os
 from environment_cleancode import CarEnv
 import time
+from stable_baselines3.common.callbacks import EvalCallback
 
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/3110/{int(time.time())}/"
-logdir = f"logs/3110/{int(time.time())}/"
+models_dir = f"models/1111/{int(time.time())}/"
+logdir = f"logs/1111/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -45,21 +46,26 @@ model = PPO(
     'MlpPolicy', 
     env, 
     verbose=1, 
-    learning_rate=0.0003, 
+    learning_rate=0.001, #0.00003
     n_steps=1024, 
-    batch_size=64, 
+    batch_size=128, #128
     clip_range=0.1, 
     gamma=0.99, 
     normalize_advantage=True,
     tensorboard_log=logdir
 )
 
-TIMESTEPS = 250000 # how long is each training iteration - individual steps
-iters = 0
-while iters<4:  # how many training iterations you want 
+TIMESTEPS = 1000000 
+iters = 0 # how long is each training iteration - individual steps
+while iters<2:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
-	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO" )
+	# Create the callback: check every 10000 steps
+	eval_callback = EvalCallback(env, best_model_save_path=models_dir,
+								 log_path=logdir, eval_freq=10000,
+								 deterministic=True, render=False)
+
+	model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False, tb_log_name=f"PPO", callback=eval_callback)
 	print('Iteration ', iters,' has been trained')
 	model.save(f"{models_dir}/{TIMESTEPS*iters}")
 
