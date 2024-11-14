@@ -25,8 +25,8 @@ from stable_baselines3.common.callbacks import EvalCallback
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/1111/{int(time.time())}/"
-logdir = f"logs/1111/{int(time.time())}/"
+models_dir = f"models/1411/{int(time.time())}/"
+logdir = f"logs/1411/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -45,10 +45,11 @@ print('Env has been reset as part of launch')
 model = PPO(
     'MlpPolicy', 
     env, 
+	
     verbose=1, 
-    learning_rate=0.001, #0.00003
+    learning_rate=0.00003, #0.00003
     n_steps=1024, 
-    batch_size=128, #128
+    batch_size=64, #128
     clip_range=0.1, 
     gamma=0.99, 
     normalize_advantage=True,
@@ -57,7 +58,7 @@ model = PPO(
 
 TIMESTEPS = 1000000 
 iters = 0 # how long is each training iteration - individual steps
-while iters<2:  # how many training iterations you want 
+while iters<1:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	# Create the callback: check every 10000 steps

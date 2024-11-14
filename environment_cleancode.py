@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 SECONDS_PER_EPISODE = 25
 FIXED_DELTA_SECONDS = 0.01
-NO_RENDERING = False
+NO_RENDERING = True
 SYNCHRONOUS_MODE = True
 SPIN = 10
 HEIGHT = 480
@@ -78,7 +78,6 @@ class CarEnv(gym.Env):
         self.curr_waypoint = None
         self.previous_waypoints = []
         self.observation = None
-        self.episode = 0
         self.debug = False
 
     def cleanup(self):
@@ -141,7 +140,7 @@ class CarEnv(gym.Env):
         if self.step_counter % 100 == 0 and self.debug:
             print(f"Vehicle transform: {vehicle_transform}, Yaw:{vehicle_transform.rotation.yaw}, WP_Yaw:{self.curr_waypoint.transform.rotation.yaw} relative_yaw: {relative_heading}")
             print(f"destination waypoint: {self.curr_waypoint.transform.location}")
-        reward = self.calculate_reward(speed, lateral_distance, relative_heading)
+        reward = self.calculate_reward(speed, lateral_distance, relative_heading, vehicle_location)
         done = False
 
         # --- Reward based on proximity to the waypoint ---
@@ -198,8 +197,6 @@ class CarEnv(gym.Env):
         self.curr_waypoint = None
         self.dest_waypoint = None
         self.simulation_time = 0
-        self.episode += 1
-        logger.info(f"Starting episode {self.episode}")
         while self.route is None:
             self.route = self.generate_route()
             if self.route is not None:
@@ -370,40 +367,43 @@ class CarEnv(gym.Env):
             return 1 if yaw_diff > 0 else -1
         return 0
     
-    def calculate_reward(self, speed, lateral_distance, relative_heading):
-        reward = 0
+    def calculate_reward(self, speed, lateral_distance, relative_heading, vehicle_location):
+        reward = 0.5  # Baseline reward to encourage movement
 
-        # Penalize for not moving or moving very slowly
-        if speed <= 0.1:  # Vehicle almost stationary
-            reward -= 10.0
-            return reward  # Stronger penalty for being stationary
+        # Strong penalty for being stationary
+        if speed <= 0.1:
+            reward -= 5.0  # Reduced penalty to avoid discouraging initial movement
+            return reward
+
+        # Reward/Penalty for Speed
+        if 0.17 <= speed <= 0.42:  # Desired speed range (10-25 km/h)
+            reward += 2.0  # Reward for staying within optimal speed range
+        elif speed > 0.42:
+            reward -= (speed - 0.42) ** 2 / 50  # Slightly less severe overspeed penalty
         else:
-            # Reward for maintaining a speed within 10-25 km/h (normalized speed 0.17 - 0.42)
-            if 0.17 <= speed <= 0.42:
-                reward += 0
-            elif speed > 0.42:  # Penalize over-speeding (beyond ~30 km/h)
-                reward -= (speed - 0.42) ** 2 / 50  # Higher penalty for over-speeding
-            else:  # Penalize for going too slowly
-                reward -= (0.17 - speed) ** 2 / 50
+            reward -= (0.17 - speed) ** 2 / 50  # Slightly less severe underspeed penalty
 
-        # Penalize for deviation in lateral distance from the center line
-        lateral_threshold = 0.05 # Threshold for lateral distance
+        # Penalize for lateral distance from the center line
+        lateral_threshold = 0.05
         if abs(lateral_distance) < lateral_threshold:
-            reward += 0  # Reward for staying within lateral threshold
+            reward += 1.5  # Increased reward for staying close to the center
         else:
-            # Exponential penalty that increases sharply as lateral distance increases
             lateral_penalty = 10 / (1 + np.exp(-15 * (abs(lateral_distance) - lateral_threshold)))
             reward -= lateral_penalty
 
-        # Penalize for deviation in heading (relative yaw)
-        relative_heading_threshold = 0.03  # Degrees
-        if abs(relative_heading ) < relative_heading_threshold:
-            reward += 0 # Reward for maintaining heading within threshold
+        # Penalize for heading deviation
+        relative_heading_threshold = 0.03
+        if abs(relative_heading) < relative_heading_threshold:
+            reward += 1.5  # Increased reward for good heading alignment
         else:
-            # Exponential penalty for large deviations in heading
             heading_penalty = 10 / (1 + np.exp(-15 * (abs(relative_heading) - relative_heading_threshold)))
             reward -= heading_penalty
+
+        distance_travelled = self.start_waypoint.location.distance(vehicle_location)
+        reward += 0.5 * distance_travelled        
+
         return reward
+
 
     def generate_route(self,start_waypoint=None):
 
