@@ -26,8 +26,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 SECONDS_PER_EPISODE = 25
-FIXED_DELTA_SECONDS = 0.02
-NO_RENDERING = False
+FIXED_DELTA_SECONDS = 0.01
+NO_RENDERING = True
 SYNCHRONOUS_MODE = True
 SPIN = 10
 HEIGHT = 480
@@ -49,7 +49,7 @@ class CarEnv(gym.Env):
         low = np.array([-1, 0, -1, -1], dtype=np.float32)  # Set speed to [0, 1] and other values to [-1, 1]
         high = np.array([1, 1, 1, 1], dtype=np.float32)
         self.observation_space = spaces.Box(low=low, high=high, shape=(obs_dim,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([15, 7])  # No change to the action space
+        self.action_space = spaces.Box(low=np.array([-1, -1]), high=np.array([1, 1]), dtype=np.float32)
 
         self.client = carla.Client('localhost', 2000)
         self.client.set_timeout(15.0)
@@ -114,20 +114,15 @@ class CarEnv(gym.Env):
         self.world.tick()
         self.simulation_time += FIXED_DELTA_SECONDS
         steer, throttle = action
-        # Map steering actions
-        # Generate equally spaced values from -1 to 1 for steering
-        steer_values = np.linspace(-1, 1, 15)
-        steer_mapping = {i: steer_values[i] for i in range(15)}
-        if steer not in steer_mapping:
-            logger.error(f"Invalid steer value: {steer}. Defaulting to 0.0")
-        steer = steer_mapping.get(steer, 0.0)  # Default to 0.0 if steer is not in the mapping
-
-        # Map throttle and apply control
-        throttle_mapping = {
-            0: (0.0, 1.0), 1: (0.0, 0.0), 2: (0.2, 0.0), 3: (0.4, 0.0), 4: (0.6, 0.0), 5: (0.8, 0.0), 6: (1.0, 0.0)
-        }
-        throttle_val, brake_val = throttle_mapping.get(throttle, (1.0, 0.0))
-
+        if throttle < 0:
+            brake_val = -throttle
+            throttle_val = 0
+        else:
+            brake_val = 0
+            throttle_val = throttle
+        steer = float(steer)
+        throttle_val = float(throttle_val)
+        brake_val = float(brake_val)
         ## TODO in BatchSync
         self.vehicle.apply_control(carla.VehicleControl(throttle=throttle_val, steer=steer, brake=brake_val))
         if self.step_counter % 100 == 0:
@@ -303,10 +298,7 @@ class CarEnv(gym.Env):
         return normalized_lateral_distance
 
     def get_relative_heading(self, vehicle_transform, waypoint, num_lookahead=5, distance_lookahead=1):
-        # Extract vehicle and waypoint yaw in degrees
-        vehicle_yaw = vehicle_transform.rotation.yaw % 360
-        waypoint_yaw = waypoint.transform.rotation.yaw % 360
-        
+
         current_waypoint = waypoint  # Start from the current waypoint
         yaw_differences_sum = 0  # Accumulator for the sum of yaw differences
         turn_direction = self.turn_direction(vehicle_transform, waypoint, num_lookahead, distance_lookahead)
@@ -318,7 +310,7 @@ class CarEnv(gym.Env):
                 break  # Stop if no valid future waypoint
             
             future_yaw = future_waypoint.transform.rotation.yaw 
-            yaw_diff = abs(current_waypoint.transform.rotation.yaw - future_yaw) % 360
+            yaw_diff = abs(current_waypoint.transform.rotation.yaw - future_yaw) 
             yaw_diff = yaw_diff if yaw_diff <= 180 else 360 - yaw_diff
             
             # Accumulate the yaw difference
@@ -335,16 +327,12 @@ class CarEnv(gym.Env):
         # else:
         #     relative_heading = (yaw_differences_sum -  relative_yaw) % 360
         # # Normalize to [-180, 180] range
-        relative_heading = (yaw_differences_sum) % 360
+        relative_heading = (yaw_differences_sum) 
         if relative_heading > 180:
             relative_heading -= 360
 
-        if turn_direction != 0:
-            normalized_heading = turn_direction * (relative_heading / 180.0)
-        else:
-            # If turn direction is 0 (i.e., straight), we just normalize relative_heading without adjustment
-            normalized_heading = relative_heading / 180.0
-        
+        normalized_heading = turn_direction * (relative_heading / 180.0)
+
         return np.clip(normalized_heading, -1, 1)
 
     def turn_direction(self, vehicle_transform, waypoint, num_lookahead=5, distance_lookahead=1):
@@ -352,7 +340,7 @@ class CarEnv(gym.Env):
         current_waypoint = waypoint
 
         # Look ahead at future waypoints
-        for i in range(1, num_lookahead + 1):
+        for _ in range(num_lookahead):
             future_waypoint = self.find_next_waypoint(current_waypoint, distance_lookahead)
             if not future_waypoint:
                 break
@@ -364,8 +352,7 @@ class CarEnv(gym.Env):
             yaw_diff = (future_yaw - vehicle_yaw + 180) % 360 - 180
             
             # Return direction: 1 for left (counterclockwise), -1 for right (clockwise)
-            return 1 if yaw_diff > 0 else -1
-        return 0
+        return 1 if yaw_diff >= 0 else -1
     
     def calculate_reward(self, speed, lateral_distance, relative_heading, vehicle_location):
         reward = 0.5  # Baseline reward to encourage movement
@@ -385,16 +372,16 @@ class CarEnv(gym.Env):
 
 
         # Penalize for lateral distance from the center line
-        lateral_penalty = 10 / (1 + np.exp(-15 * abs(lateral_distance)))
+        lateral_penalty = 15 / (1 + np.exp(-15 * abs(lateral_distance)))
         reward -= lateral_penalty
 
         # Penalize for heading deviation
 
-        heading_penalty = 10 * (abs(relative_heading) ** 2)
+        heading_penalty = 15 * (abs(relative_heading) ** 2)
         reward -= heading_penalty
 
-        # distance_travelled = self.start_waypoint.location.distance(vehicle_location)
-        # reward += 0.5 * distance_travelled        
+        distance_travelled = self.start_waypoint.location.distance(vehicle_location)
+        reward += 0.5 * distance_travelled        
 
         return reward
 

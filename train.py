@@ -18,15 +18,15 @@ from stable_baselines3 import PPO #PPO
 from stable_baselines3.common.env_checker import check_env
 
 import os
-from environment_cleancode import CarEnv
+from new_env import CarEnv
 import time
 from stable_baselines3.common.callbacks import EvalCallback
 
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/1411/{int(time.time())}/"
-logdir = f"logs/1411/{int(time.time())}/"
+models_dir = f"models/1811/{int(time.time())}/"
+logdir = f"logs/1811/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -56,9 +56,9 @@ model = PPO(
     tensorboard_log=logdir
 )
 
-TIMESTEPS = 1000000 
+TIMESTEPS = 2000000 
 iters = 0 # how long is each training iteration - individual steps
-while iters<1:  # how many training iterations you want 
+while iters < 1:  # how many training iterations you want 
 	iters += 1
 	print('Iteration ', iters,' is to commence...')
 	# Create the callback: check every 10000 steps
@@ -70,4 +70,5 @@ while iters<1:  # how many training iterations you want
 	print('Iteration ', iters,' has been trained')
 	model.save(f"{models_dir}/{TIMESTEPS*iters}")
 
+env.close()
 	
