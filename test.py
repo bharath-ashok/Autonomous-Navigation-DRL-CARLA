@@ -2,11 +2,11 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 import os
 import time
-from new_env import CarEnv
+from drive_env import CarEnv
 
 # Directory containing saved models
-models_dir = "models/1811/1731962038"
-logdir = "logs/1811/1731962038"
+models_dir = "models/drive/1733866976"
+logdir = "logs/drive/1733866976"
 
 # Ensure the directories exist
 assert os.path.exists(models_dir), f"Model directory {models_dir} does not exist!"
