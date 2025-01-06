@@ -15,18 +15,19 @@ Terminology:
 '''	
 
 from stable_baselines3 import PPO #PPO
+from stable_baselines3 import SAC #SAC
 from stable_baselines3.common.env_checker import check_env
 
 import os
-from drive_env import CarEnv
+from environment import CarEnv
 import time
 from stable_baselines3.common.callbacks import EvalCallback
 
 print('This is the start of training script')
 
 print('setting folders for logs and models')
-models_dir = f"models/drive/{int(time.time())}/"
-logdir = f"logs/drive/{int(time.time())}/"
+models_dir = f"models/Train/{int(time.time())}/"
+logdir = f"logs/Train/{int(time.time())}/"
 
 if not os.path.exists(models_dir):
 	os.makedirs(models_dir)
@@ -46,7 +47,7 @@ model = PPO(
     'MlpPolicy', 
     env, 
     verbose=1, 
-    learning_rate=0.0003, #TODO was 0.0003
+    learning_rate=0.0003, 
     n_steps=1024, 
     batch_size=128, #128
     clip_range=0.1, 
@@ -71,3 +72,18 @@ while iters < 1:  # how many training iterations you want
 
 env.close()
 	
+
+# model = SAC(
+#     'MlpPolicy', 
+#     env, 
+#     verbose=1, 
+#     learning_rate=0.0003, 
+#     buffer_size=10000,  # adjust as needed
+#     learning_starts=1000,  # adjust as needed
+#     batch_size=128, 
+#     tau=0.005,  # soft update coefficient
+#     gamma=0.99, 
+#     train_freq=1,  # update per step
+#     target_update_interval=1,  # update target network every 'n' steps
+#     tensorboard_log=logdir
+# )

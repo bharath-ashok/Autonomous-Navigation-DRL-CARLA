@@ -12,11 +12,18 @@
 # Built Visual Studio Code Extensions
 *.vsix
 
-rlvenv
+#Python and jupyter notebook
 waypoint_test.py
-models 
-logs
 .vscode
 __pycache__
 Test_Carenv.ipynb
 waypoint_test_town2.py
+workings lane info.ipynb
+
+
+#Folder
+models 
+logs
+report
+rlvenv
+archive

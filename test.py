@@ -1,54 +1,68 @@
+import csv
+import os
+from environment import CarEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
-import os
-import time
-from drive_env import CarEnv
 
-# Directory containing saved models
-models_dir = "models/drive/1733866976"
-logdir = "logs/drive/1733866976"
+# Directories
+model_id = "XXXXXXXX"   # Update this as needed   1734705949
+models_dir = f"{model_id}"
+logdir = f"{model_id}"
+step_log_file = os.path.join(logdir, "step_results_town02.csv")
 
 # Ensure the directories exist
 assert os.path.exists(models_dir), f"Model directory {models_dir} does not exist!"
 assert os.path.exists(logdir), f"Log directory {logdir} does not exist!"
 
-# List all the saved models in the directory
-model_files = [f for f in sorted(os.listdir(models_dir)) if f.endswith('.zip')]
-assert len(model_files) > 0, "No models found in the models directory!"
+# Log file for step-wise results
 
-# Load the environment
+# Prepare the environment
 env = CarEnv()
 check_env(env)
 env.reset()
 
-# Select the most recent model to test
-# Assuming the best model is the one with the highest reward in the filename
+# List all saved models
+model_files = [f for f in sorted(os.listdir(models_dir)) if f.endswith('.zip')]
+assert len(model_files) > 0, "No models found in the models directory!"
+
+# Load the best or most recent model
 best_model_file = ('best_model' if 'best_model' in model_files else model_files[-1])
 latest_model_path = os.path.join(models_dir, best_model_file)
-print(f"Loading best model from {latest_model_path}")
+print(f"Loading model from {latest_model_path}")
 model = PPO.load(latest_model_path, env=env)
 
-# Number of episodes to test
-num_test_episodes = 5
+# Number of test episodes
+num_test_episodes = 10
 
-for episode in range(num_test_episodes):
+# Prepare to log results
+fields = ["Episode", "Step", "Action", "Reward", "Total Reward", "Done", "Truncated"]
+if not os.path.exists(step_log_file):
+    with open(step_log_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(fields)
+
+# Testing loop
+for episode in range(1, num_test_episodes + 1):
     obs, info = env.reset()
     done = False
+    truncated = False
     total_reward = 0
-    timestep = 0
+    step = 0
 
-    print(f"Starting Episode {episode + 1}")
+    print(f"Starting Episode {episode}")
 
-    while not done:
+    while not done and not truncated:
         # Get the action from the model
         action, _states = model.predict(obs)
         obs, reward, done, truncated, info = env.step(action)
         total_reward += reward
-        timestep += 1
-        if done or truncated:
-            break
+        step += 1
 
-    print(f"Episode {episode + 1} finished. Total Reward: {total_reward} after {timestep} timesteps.\n")
+        # Log the step data
+        # with open(step_log_file, mode='a', newline='') as file:
+        #     writer = csv.writer(file)
+        #     writer.writerow([episode, step, action, reward, total_reward, done, truncated])
 
-print("Testing completed.")
+    print(f"Episode {episode} finished. Total Reward: {total_reward} after {step} steps.\n")
+
 env.close()
